@@ -159,6 +159,17 @@ function render(s) {
       ? 'Current: ' + s.timerSeconds + 's (applies from next question)'
       : 'Current: off';
 
+  // target score — locked once the match is under way
+  const winInput = document.getElementById('winInput');
+  const winBtn = document.getElementById('winBtn');
+  const winEditable = s.phase === 'login' || s.phase === 'ready';
+  winInput.placeholder = s.winScore;
+  winInput.disabled = !winEditable;
+  winBtn.disabled = !winEditable;
+  document.getElementById('winNote').textContent = winEditable
+    ? 'Current: first to ' + s.winScore + ' (and ahead)'
+    : 'Current: ' + s.winScore + ' — locked until the next match';
+
   // difficulty toggles + per-tier counts for the selected set
   const tiers = s.difficulty || ['medium', 'hard', 'pro'];
   [
@@ -343,6 +354,11 @@ socket.on('passwordChanged', ({ token } = {}) => {
 document.getElementById('timerBtn').onclick = () => {
   const v = parseInt(document.getElementById('timerInput').value, 10);
   if (Number.isInteger(v)) socket.emit('host:setTimer', { seconds: v });
+};
+
+document.getElementById('winBtn').onclick = () => {
+  const v = parseInt(document.getElementById('winInput').value, 10);
+  if (Number.isInteger(v)) socket.emit('host:setWinScore', { score: v });
 };
 
 // Local 1s countdown from the server deadline (epoch ms).

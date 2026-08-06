@@ -5,6 +5,17 @@ const { shuffle } = require('./util');
 const { pickTwoNames } = require('./teamNames');
 const { cleanName, validAnswer } = require('./validation');
 
+// Bounds for the host-configurable target score. Below 1 is meaningless; above
+// 20 the match no longer fits a single session.
+const WIN_SCORE_MIN = 1;
+const WIN_SCORE_MAX = 20;
+
+function clampWinScore(n) {
+  const v = Number(n);
+  if (!Number.isInteger(v)) return 3;
+  return Math.min(WIN_SCORE_MAX, Math.max(WIN_SCORE_MIN, v));
+}
+
 // Encapsulates the whole game state machine.
 // phases: 'login' | 'ready' | 'question' | 'reveal' | 'gameover'
 // Pure of any transport concerns — the socket layer calls these methods and broadcasts.
@@ -13,7 +24,7 @@ class GameEngine {
     this.sets = sets;
     this.order = order;
     this.store = store;
-    this.winScore = winScore;
+    this.winScore = clampWinScore(winScore);
     this.requiresPassword = !!requiresPassword;
     this.maxPlayers = maxPlayers || 200;
     this.timerSeconds = Number.isInteger(timerSeconds) ? timerSeconds : 60;
@@ -216,6 +227,18 @@ class GameEngine {
     return true;
   }
 
+  // Host-configurable target score, per room. Only settable before the match is
+  // under way: lowering it mid-match would hand out a retroactive win, and
+  // raising it while a team sits one point from the line is just as unfair.
+  setWinScore(score) {
+    const n = Number(score);
+    if (!Number.isInteger(n) || n < WIN_SCORE_MIN || n > WIN_SCORE_MAX) return false;
+    const phase = this.game.phase;
+    if (phase !== 'login' && phase !== 'ready') return false;
+    this.winScore = n;
+    return true;
+  }
+
   // Called periodically by the transport layer; reveals when time is up.
   // Teams that have not voted simply score nothing (reveal treats null as wrong).
   checkTimeout(now = Date.now()) {
@@ -355,4 +378,4 @@ class GameEngine {
   }
 }
 
-module.exports = { GameEngine };
+module.exports = { GameEngine, WIN_SCORE_MIN, WIN_SCORE_MAX };

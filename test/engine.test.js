@@ -44,6 +44,64 @@ function startTwoPlayerMatch(e) {
 }
 
 describe('GameEngine (unit)', () => {
+  test('setWinScore: accepts a valid target before the match starts', () => {
+    const e = newEngine();
+    assert.strictEqual(e.phase, 'login');
+    assert.strictEqual(e.setWinScore(7), true);
+    assert.strictEqual(e.winScore, 7);
+    assert.strictEqual(e.publicState('host').winScore, 7);
+
+    // still editable in 'ready' (teams drawn, match not started)
+    e.join('a', 'Alice');
+    e.join('b', 'Bob');
+    assert.ok(e.drawTeams().ok);
+    assert.strictEqual(e.phase, 'ready');
+    assert.strictEqual(e.setWinScore(2), true);
+    assert.strictEqual(e.winScore, 2);
+  });
+
+  test('setWinScore: rejects out-of-range and non-integer values', () => {
+    const e = newEngine();
+    for (const bad of [0, -1, 21, 2.5, 'x', null, undefined, NaN]) {
+      assert.strictEqual(e.setWinScore(bad), false, 'should reject ' + String(bad));
+    }
+    assert.strictEqual(e.winScore, 3);
+  });
+
+  test('setWinScore: refused once the match is under way', () => {
+    const e = newEngine();
+    startTwoPlayerMatch(e);
+    assert.strictEqual(e.phase, 'question');
+    assert.strictEqual(e.setWinScore(1), false);
+    assert.strictEqual(e.winScore, 3);
+
+    // and editable again after a new match resets to 'login'
+    e.resetMatch();
+    assert.strictEqual(e.setWinScore(5), true);
+    assert.strictEqual(e.winScore, 5);
+  });
+
+  test('a custom target score actually decides the match', () => {
+    const e = newEngine();
+    assert.strictEqual(e.setWinScore(1), true);
+    const { teamA } = startTwoPlayerMatch(e);
+    const c = e.game.current.correct;
+    e.vote('a', c);
+    e.vote('b', (c + 1) % 4);
+    assert.strictEqual(e.game.teams[teamA].score, 1);
+    assert.strictEqual(e.phase, 'gameover');
+    assert.strictEqual(e.game.winner, teamA);
+  });
+
+  test('constructor clamps an out-of-range WIN_SCORE from the environment', () => {
+    const { sets, order } = loadSets(QUESTIONS_DIR);
+    const mk = (winScore) =>
+      new GameEngine({ sets, order, store: fakeStore(), winScore, requiresPassword: false });
+    assert.strictEqual(mk(0).winScore, 1);
+    assert.strictEqual(mk(999).winScore, 20);
+    assert.strictEqual(mk(NaN).winScore, 3);
+  });
+
   test('scoring: correct answer scores, wrong does not', () => {
     const e = newEngine();
     const { teamA, teamB } = startTwoPlayerMatch(e);
