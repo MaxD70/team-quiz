@@ -1,0 +1,20 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- if and (eq (int .Values.replicaCount) 1) (not .Values.podDisruptionBudget.allowSingleReplica) }}
+{{- fail "podDisruptionBudget.enabled=true with replicaCount=1 will BLOCK node drains forever (the eviction can never satisfy the budget) — you will get PodEvictionFailure on every AMI upgrade. Either raise replicaCount, or set podDisruptionBudget.allowSingleReplica=true if you have accepted that trade-off deliberately." }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "team-quiz.fullname" . }}
+  labels:
+    {{- include "team-quiz.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "team-quiz.selectorLabels" . | nindent 6 }}
+{{- end }}

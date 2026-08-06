@@ -12,35 +12,39 @@
 services:
   app:
     build: .
-    image: team-quiz:1.11.0
+    image: team-quiz:1.12.0
     container_name: team-quiz
     restart: unless-stopped
 
     environment:
-      PORT: "3000"
-      WIN_SCORE: "${WIN_SCORE:-3}"
-      TIMER_SECONDS: "${TIMER_SECONDS:-60}"
-      MAX_PLAYERS: "${MAX_PLAYERS:-200}"
-      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      PORT: '3000'
+      WIN_SCORE: '${WIN_SCORE:-3}'
+      TIMER_SECONDS: '${TIMER_SECONDS:-60}'
+      MAX_PLAYERS: '${MAX_PLAYERS:-200}'
+      LOG_LEVEL: '${LOG_LEVEL:-info}'
       # DATA_FILE and ADMINS_FILE are already set in the image (both under /data);
       # they are repeated here only to make the persistence explicit.
       DATA_FILE: /data/state.json
       ADMINS_FILE: /data/admins.json
       # Secrets — supplied via .env, never hard-coded here.
-      SHARED_PASSWORD: "${SHARED_PASSWORD:-}"
-      SUPER_ADMIN_USER: "${SUPER_ADMIN_USER:-superadmin}"
-      SUPER_ADMIN_PASSWORD: "${SUPER_ADMIN_PASSWORD:-}"
+      SHARED_PASSWORD: '${SHARED_PASSWORD:-}'
+      SUPER_ADMIN_USER: '${SUPER_ADMIN_USER:-superadmin}'
+      SUPER_ADMIN_PASSWORD: '${SUPER_ADMIN_PASSWORD:-}'
+      # Empty by default => single node, file-backed state (nothing changes).
+      # With `--profile redis`, set REDIS_URL=redis://redis:6379 in .env to share
+      # admins and question history across replicas. See docs/scaling.md.
+      REDIS_URL: '${REDIS_URL:-}'
 
     # Bind to localhost by default and put a proxy in front. With --profile proxy,
     # Caddy reaches the app over the internal network; comment this block out then.
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:3000:3000"
+      - '${BIND_ADDR:-127.0.0.1}:3000:3000'
 
     volumes:
       - quiz-data:/data
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/healthz']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -48,7 +52,7 @@ services:
 
     # --- Hardening (consistent with the security review) ---
     # The image already runs as the non-root "node" user (uid 1000).
-    read_only: true              # rootfs immutable; the app only writes to /data
+    read_only: true # rootfs immutable; the app only writes to /data
     tmpfs:
       - /tmp
     security_opt:
@@ -59,7 +63,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.50"
+          cpus: '0.50'
           memory: 256M
         reservations:
           memory: 64M
@@ -67,8 +71,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
     networks:
       - quiznet
@@ -79,22 +83,48 @@ services:
     image: caddy:2-alpine
     container_name: team-quiz-caddy
     restart: unless-stopped
-    profiles: ["proxy"]
+    profiles: ['proxy']
     depends_on:
       - app
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     environment:
-      QUIZ_DOMAIN: "${QUIZ_DOMAIN:-quiz.example.com}"
+      QUIZ_DOMAIN: '${QUIZ_DOMAIN:-quiz.example.com}'
       # Non-empty default: an empty value would make the Caddyfile's global
       # `email {$TLS_EMAIL}` directive fail to parse. Set a real address in
       # .env to receive Let's Encrypt expiry/renewal notices.
-      TLS_EMAIL: "${TLS_EMAIL:-admin@example.com}"
+      TLS_EMAIL: '${TLS_EMAIL:-admin@example.com}'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    networks:
+      - quiznet
+
+  # ---- Optional Redis for the multi-replica setup ----
+  # Enabled only with:  docker compose --profile redis up -d
+  # Then set REDIS_URL=redis://redis:6379 in .env so the app picks it up.
+  #
+  # Redis holds the state that MUST be shared between replicas: admin accounts
+  # and which questions have already been asked. Game state stays in each
+  # replica's memory — see docs/scaling.md for why that is deliberate, and why
+  # sticky sessions alone would NOT be enough.
+  redis:
+    image: redis:7-alpine
+    container_name: team-quiz-redis
+    restart: unless-stopped
+    profiles: ['redis']
+    # appendonly: survive a restart without losing the admin list.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # Not published to the host: only reachable from the compose network.
     networks:
       - quiznet
 
@@ -104,5 +134,6 @@ networks:
 
 volumes:
   quiz-data:
+  redis-data:
   caddy-data:
   caddy-config:

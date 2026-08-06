@@ -15,6 +15,13 @@ spec:
       {{- include "team-quiz.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        # Roll the pods when the config or secret changes — otherwise a
+        # `helm upgrade` that only touches values leaves the old env in place.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.app.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "team-quiz.selectorLabels" . | nindent 8 }}
     spec:
@@ -23,6 +30,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "team-quiz.serviceAccountName" . }}
+      # NOTE: the app's own shutdown handler force-exits 5s after SIGTERM, so a
+      # longer grace period here will NOT save a game that is mid-question.
+      # Games are protected by *when* you deploy, not by this number.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -47,15 +58,31 @@ spec:
                   key: shared-password
                   {{- end }}
                   optional: true
+            - name: SUPER_ADMIN_USER
+              value: {{ .Values.app.superAdminUser | quote }}
+            # Without this the super-admin panel is LOCKED, so no admin accounts
+            # can be created and NOBODY CAN HOST A GAME. The app will start and
+            # look healthy while being completely unusable.
+            - name: SUPER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.app.existingSecret }}
+                  name: {{ .Values.app.existingSecret }}
+                  key: {{ .Values.app.existingSecretSuperKey }}
+                  {{- else }}
+                  name: {{ include "team-quiz.fullname" . }}
+                  key: super-admin-password
+                  {{- end }}
+                  optional: true
           readinessProbe:
             httpGet:
-              path: /config
+              path: /healthz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /config
+              path: /healthz
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
