@@ -12,7 +12,7 @@
 services:
   app:
     build: .
-    image: team-quiz:1.13.0
+    image: team-quiz:1.13.1
     container_name: team-quiz
     restart: unless-stopped
 
