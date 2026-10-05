@@ -1,0 +1,63 @@
+Team Quiz {{ .Chart.AppVersion }} deployed as {{ include "team-quiz.fullname" . }}.
+
+{{- if not (or .Values.app.superAdminPassword .Values.app.existingSecret) }}
+
+  ############################################################################
+  ##  WARNING: NO SUPER-ADMIN PASSWORD SET                                   ##
+  ##                                                                         ##
+  ##  The super-admin panel is LOCKED. No admin accounts can be created,     ##
+  ##  which means NOBODY CAN HOST A GAME. The pod will look perfectly        ##
+  ##  healthy and be completely unusable.                                    ##
+  ##                                                                         ##
+  ##  Fix it now, not five minutes before a session:                         ##
+  ##                                                                         ##
+  ##    helm upgrade {{ .Release.Name }} deploy/helm/team-quiz \
+  ##      --reuse-values \
+  ##      --set app.superAdminPassword="$(openssl rand -base64 24)"          ##
+  ##                                                                         ##
+  ##  Then sign in at /admin.html as "{{ .Values.app.superAdminUser }}" and  ##
+  ##  create at least one admin account — admins are who host games.         ##
+  ############################################################################
+{{- end }}
+
+1. Check it came up, and what it thinks its state is:
+
+     kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/name={{ include "team-quiz.name" . }}
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "team-quiz.fullname" . }} 8080:{{ .Values.service.port }}
+     curl -s localhost:8080/healthz | jq
+
+   You want to see: sets (18), admins (>0 before a session!), and
+   redis: {{ if .Values.redis.url }}true{{ else }}false{{ end }}.
+
+{{- if .Values.ingress.enabled }}
+
+2. Once the ingress has an address, the app is at:
+
+     https://{{ .Values.ingress.host }}
+{{- end }}
+
+3. Before any real session, confirm you have at least one admin account:
+
+     curl -s https://{{ .Values.ingress.host }}/healthz | jq .admins
+
+   Zero means nobody can host. Create one from /admin.html as the super-admin.
+
+{{- if gt (int .Values.replicaCount) 1 }}
+
+  ############################################################################
+  ##  DANGER: replicaCount = {{ .Values.replicaCount }}                      ##
+  ##                                                                         ##
+  ##  Multiple replicas are NOT SAFE yet. Game state lives in one pod's      ##
+  ##  memory and room codes are generated at random, so players in the same  ##
+  ##  game will be routed to different pods and told the room doesn't exist. ##
+  ##                                                                         ##
+  ##  See docs/scaling.md. Set replicaCount back to 1.                       ##
+  ############################################################################
+{{- end }}
+
+{{- if not .Values.redis.url }}
+
+Note: admin accounts live on the PVC ({{ .Values.persistence.mountPath }}/admins.json).
+They survive a pod restart, but not a lost volume. Setting redis.url moves them
+off the pod's filesystem — worth doing even with a single replica.
+{{- end }}

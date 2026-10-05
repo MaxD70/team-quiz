@@ -32,20 +32,21 @@ one admin account — until then nobody can host.
 
 Environment variables:
 
-| Var               | Default            | Meaning                                            |
-|-------------------|--------------------|----------------------------------------------------|
-| `PORT`            | `3000`             | HTTP port                                          |
-| `WIN_SCORE`       | `3`                | Points needed to win (must also be ahead)          |
-| `SHARED_PASSWORD` | *(empty)*          | If set, players must also enter this shared password to join. Empty = no player password. |
-| `SUPER_ADMIN_USER`| `superadmin`       | Username for the super-admin panel (`/admin.html`).|
-| `SUPER_ADMIN_PASSWORD` | *(empty)*     | Super-admin password. **Empty = the super panel is LOCKED** (no one can create admins). Set it on every deployment. |
-| `ADMINS_FILE`     | `./data/admins.json`| Where admin accounts are stored (scrypt-hashed passwords). Keep it off version control. |
-| `DATA_FILE`       | `./data/state.json`| Where the used-question history is stored          |
-| `QUESTIONS_DIR`   | `./questions`      | Directory of question-set files                    |
-| `MAX_PLAYERS`     | `200`              | Cap on distinct players held in memory             |
-| `LOG_LEVEL`       | `info`             | Pino log level (`debug`, `info`, `warn`, …)        |
+| Var                    | Default              | Meaning                                                                                                             |
+| ---------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                 | `3000`               | HTTP port                                                                                                           |
+| `WIN_SCORE`            | `3`                  | Points needed to win (must also be ahead)                                                                           |
+| `SHARED_PASSWORD`      | _(empty)_            | If set, players must also enter this shared password to join. Empty = no player password.                           |
+| `SUPER_ADMIN_USER`     | `superadmin`         | Username for the super-admin panel (`/admin.html`).                                                                 |
+| `SUPER_ADMIN_PASSWORD` | _(empty)_            | Super-admin password. **Empty = the super panel is LOCKED** (no one can create admins). Set it on every deployment. |
+| `ADMINS_FILE`          | `./data/admins.json` | Where admin accounts are stored (scrypt-hashed passwords). Keep it off version control.                             |
+| `DATA_FILE`            | `./data/state.json`  | Where the used-question history is stored                                                                           |
+| `QUESTIONS_DIR`        | `./questions`        | Directory of question-set files                                                                                     |
+| `MAX_PLAYERS`          | `200`                | Cap on distinct players held in memory                                                                              |
+| `LOG_LEVEL`            | `info`               | Pino log level (`debug`, `info`, `warn`, …)                                                                         |
 
 ## Production hardening
+
 - **Security headers** via Helmet (CSP, HSTS, X-Frame-Options, nosniff, no `X-Powered-By`).
 - **Per-socket rate limiting**: excess events are dropped and flooding sockets disconnected.
 - **Input validation**: player ids, names (sanitised, length-capped) and answers are checked server-side; Socket.IO frame size is capped.
@@ -58,25 +59,31 @@ SUPER_ADMIN_PASSWORD=pick-a-strong-one SHARED_PASSWORD=letmein npm start
 ```
 
 ## Tests
+
 ```bash
 npm test
 ```
+
 Node's built-in runner (`node --test`) covers four files:
+
 - **`test/engine.test.js`** — the `GameEngine` in isolation with an in-memory store: scoring, the win/tie rule, no-repeat + reset, vote locking, timer, difficulty tiers, and answer hiding. Fast, no sockets.
 - **`test/rooms.test.js`** — the `RoomManager`: unique codes, per-room isolation, capacity, idle sweep, and per-admin lookup.
 - **`test/admins.test.js`** — the admin store: validation, scrypt hashing (no plaintext on disk), verify/reset/change/remove, and super-admin verification.
 - **`test/game.test.js`** — the real server over live sockets: game logic end-to-end, admin + super-admin authentication, room isolation, input sanitisation and `/healthz`.
 
 ## Development
+
 ```bash
 npm run lint          # ESLint
 npm run format        # Prettier (write)
 npm run validate      # check every question set (schema + answer-bias guards)
 npm run format:check  # Prettier (check only)
 ```
+
 CI runs lint, format check and tests on every push/PR (`.github/workflows/ci.yml`).
 
 ## Project structure
+
 ```
 server.js            entry point: express app, helmet, Socket.IO, listen, graceful shutdown
 store.js             persistence for per-set "already asked" history (atomic file writes)
@@ -134,6 +141,7 @@ running. Admins cannot create other admins — only the super-admin can.
    continues until one pulls ahead.
 
 ### No repeats
+
 Every question has a stable id. Each new question is drawn at random from the ones not
 yet used, and is recorded immediately. When all 60 have been used the history clears and
 the pool starts over. The host panel shows **M / 60 used overall**.
@@ -238,6 +246,7 @@ into the volume before the first `up`. A `Dockerfile` and a Kubernetes/Helm char
 are also included for running the same image on the EKS platform.
 
 ## Question sets
+
 Questions live in `questions/`, one JSON file per set. The host picks which set to play
 from a dropdown in the lobby, and the "already asked" history is tracked **per set**, so
 each set exhausts its own pool independently.
@@ -251,6 +260,7 @@ set for schema, answer-position balance, length bias, and duplicates. The host p
 a used/total counter per set and a per-set "Reset question history".
 
 Each set file:
+
 ```json
 {
   "id": "java-devops-core",
@@ -258,11 +268,18 @@ Each set file:
   "description": "Shown under the selector.",
   "order": 1,
   "questions": [
-    { "id": "q001", "topic": "Java", "text": "…", "options": ["…","…","…","…"],
-      "correct": 0, "explanation": "Shown to both teams after the vote." }
+    {
+      "id": "q001",
+      "topic": "Java",
+      "text": "…",
+      "options": ["…", "…", "…", "…"],
+      "correct": 0,
+      "explanation": "Shown to both teams after the vote."
+    }
   ]
 }
 ```
+
 `correct` is the zero-based index. `order` controls the position in the dropdown. To add a
 set, drop a new file in `questions/` and restart the service — no code change. Ids only need
 to be unique within their own set. `build_sets.py` is the tool used to create the shipped
@@ -272,6 +289,7 @@ The explanation is revealed only after both teams vote (the host also sees it du
 question, to read aloud).
 
 ## Persistence: why a file, not a database
+
 The only thing that needs to survive restarts is the small set of used-question ids, so
 the persistence layer (`store.js`) writes an atomic JSON file. The interface is tiny —
 `getUsed` / `markUsed` / `resetUsed` — so if you later want a real database (e.g. to keep
@@ -280,12 +298,17 @@ implementation without changing `server.js`. SQLite (single file, no server) is 
 natural next step; Postgres only if you go multi-instance.
 
 ## Changelog (recent)
+
+- **v1.13.1** — dependency patch bumps closing three advisories, all transitive and none requiring a code change: `socket.io-parser` 4.2.6→4.2.7 (GHSA-2m8v-j782-fhvr, zero-attachment memory exhaustion — the one that mattered, since the app is a public Socket.IO endpoint), `body-parser` 1.20.5→1.20.6, and `brace-expansion` 1.1.17→1.1.18 (dev-only, via ESLint). Lockfile only; `npm audit` now reports clean.
+- **v1.13.0** — the host can set the target score per room: "Questions to win (1-20)" in the host controls, next to the timer. `WIN_SCORE` still supplies the default (now clamped into range at construction), but each room can override it. The target is locked once the match is under way — lowering it mid-match would hand out a retroactive win, and raising it with a team one point from the line is equally unfair — and unlocks again on "New match".
+- **v1.12.0** — optional Redis backend for the state that must be shared between replicas (admin accounts, question history), behind the same synchronous interface; the file backend remains the default and single-node behaviour is unchanged. Includes the Socket.IO Redis adapter, an optional `redis` Compose profile, automatic seeding from `admins.json`, and [docs/scaling.md](docs/scaling.md) explaining why sticky sessions were _not_ the answer.
 - **v1.11.0** — library expansion: two new sets (Observability & Monitoring; Python & Scripting, 30 questions each), Security grown 60→90 with a T-Level-friendly tier, and linux-cli/git-workflow/aws-fundamentals fattened to 40 each. 18 sets, 664 questions, all through the validator (position and length-bias checks included).
 - **v1.10.0**: sound on reveal (synthesized via WebAudio — no audio assets; mute toggle in the top bar) and a read-only big-screen spectator view at `/spectate.html` (open it from the host panel's "Big screen" button, or share `/spectate.html?room=CODE`). Spectators see the player view of the state — never the answer before reveal — and don't appear in the roster. `loadSets` now also skips dotfiles, so stray macOS `._*.json` AppleDouble files can no longer crash startup.
 - **v1.9.0** — security hardening (from the security review): admin/super-admin sessions now use short-lived, server-issued bearer tokens instead of keeping the password in `sessionStorage` (`admin:resume`/`super:resume`, revocable via the new "Sign out" button); repeated failed logins from the same IP are throttled (`src/loginThrottle.js`); and player identifiers broadcast to the room are now unlinkable `publicId`s — knowing one no longer lets another client take over that player's session (`src/game.js`).
 - **Earlier versions** (v1.1.0–v1.8.0, including the move to concurrent rooms: `RoomManager` keys one `GameEngine` per room, so many hosts run isolated games at once): see the full version history in the [technical overview](public/tech.html).
 
 ## Possible next steps
-- Run multi-replica by moving game state behind a Redis adapter with sticky sessions (only needed for far larger or concurrent sessions).
+
+- Run multi-replica (Redis-backed shared state is done — see [docs/scaling.md](docs/scaling.md)). What is left is the Helm chart with room-affinity routing (`upstream-hash-by: $arg_room`) and a PDB. Note: this is about running where the rest of the platform runs, **not** about load — ten concurrent games is a hundred sockets, which one small instance handles without noticing.
 - Deploy on the EKS platform using the included Helm chart (`deploy/helm/`).
 - Keep growing the question library as the programme runs.

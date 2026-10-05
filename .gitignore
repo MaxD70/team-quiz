@@ -9,6 +9,9 @@ data/
 *.env
 *.pem
 
+# stray patch files (apply them, do not commit them)
+*.patch
+
 # OS / editor noise
 .DS_Store
 *.log

@@ -249,6 +249,16 @@ function registerSocketHandlers(io, manager) {
     socket.on('host:setStack', ({ stackId } = {}) => asAdmin((e) => e.setStack(stackId)));
     socket.on('host:endMatch', () => asAdmin((e) => e.endMatch().ok));
     socket.on('host:setTimer', ({ seconds } = {}) => asAdmin((e) => e.setTimer(seconds)));
+    socket.on('host:setWinScore', ({ score } = {}) =>
+      asAdmin((e) => {
+        if (e.setWinScore(score)) return true;
+        socket.emit('hostError', {
+          reason:
+            'Target score must be a whole number 1-20, and can only be changed before the match starts.'
+        });
+        return false;
+      })
+    );
     socket.on('host:setDifficulty', ({ tiers } = {}) => asAdmin((e) => e.setDifficulty(tiers)));
     socket.on('host:rerollNames', () => asAdmin((e) => e.rerollNames()));
     socket.on('host:setName', ({ team, name } = {}) => asAdmin((e) => e.setName(team, name)));

@@ -1,16 +1,36 @@
-# -- Keep at 1. State (players, teams, votes, question history) lives in a single
-# process. Multiple replicas would need a Socket.IO Redis adapter + sticky sessions
-# and externalised state, which is unnecessary for a single-room game.
+# =============================================================================
+#  IMPORTANT — READ BEFORE RAISING replicaCount
+# =============================================================================
+# Keep this at 1 for now. More than one replica is NOT yet safe, and the reason
+# is subtler than it looks. Full explanation in docs/scaling.md; short version:
+#
+#   * Game state (players, teams, votes) lives in one pod's memory, keyed by room
+#     code. For 2+ replicas, every connection for a given game must land on the
+#     SAME pod ("room affinity").
+#   * Sticky sessions do NOT achieve that. Sticky is per *client*: it pins one
+#     player to a pod but says nothing about where their teammates land. A
+#     teammate on another pod is told the room doesn't exist.
+#   * Hashing the ingress on the room code is the right idea, but does not work
+#     yet: the room code is generated at RANDOM by whichever pod handled the
+#     host's login (src/rooms.js `_newCode`). The pod creating a room has no
+#     control over which pod that code hashes to.
+#
+# Safe replicas need the allocation flow inverted (allocate the code first,
+# reconnect with ?room=CODE, let the pod the hash lands on create the room).
+# Until that lands: one replica.
+#
+# This is fine. Ten concurrent games of ten players is ~100 sockets — one small
+# pod idles through that. You run this on EKS to be where the platform is, not
+# because you need the scale. Be honest about that when you propose it.
 replicaCount: 1
 
 image:
   # Your Artifactory Docker registry path
   repository: your-artifactory.example.com/docker-local/team-quiz
-  tag: "1.0.0"
+  tag: "1.12.0"
   pullPolicy: IfNotPresent
 
 # Secret used to pull the image from Artifactory (docker-registry type).
-# Create it once in the namespace, then reference it here.
 imagePullSecrets:
   - name: artifactory-cred
 
@@ -23,24 +43,61 @@ serviceAccount:
 
 app:
   winScore: 3
-  # Optional shared join password. Empty = no password.
-  # For anything real, provide it via an existing Secret (see app.existingSecret)
-  # or --set app.sharedPassword=... rather than committing it here.
+  timerSeconds: 60
+  maxPlayers: 200
+  logLevel: info
+
+  # Optional shared join password for players. Empty = no password.
   sharedPassword: ""
-  # If set, SHARED_PASSWORD is read from this existing secret's key instead of app.sharedPassword.
+
+  # --- Super-admin: REQUIRED, or the app is unusable --------------------------
+  # With no super-admin password the super panel is LOCKED: no admin accounts can
+  # be created, so NOBODY CAN HOST A GAME. The pod starts, passes its health
+  # check, and is completely useless. Do not discover this five minutes before a
+  # session.
+  #
+  # Do NOT commit a real password. Either:
+  #   helm upgrade ... --set app.superAdminPassword="$(openssl rand -base64 24)"
+  # or point app.existingSecret at a Secret you manage separately.
+  superAdminUser: superadmin
+  superAdminPassword: ""
+
+  # HTTPS-forcing security headers (HSTS + CSP upgrade-insecure-requests). Leave
+  # true for any real deployment (behind the ALB, TLS is terminated for you).
+  # Set false ONLY for plain-HTTP testing, e.g. a local k3d cluster — otherwise
+  # the browser rewrites every request to https:// and caches that for months.
+  enableHttps: true
+
+  # If set, passwords come from this existing Secret instead of the values above.
   existingSecret: ""
   existingSecretKey: "shared-password"
+  existingSecretSuperKey: "super-admin-password"
+
+# --- Shared state (optional) --------------------------------------------------
+# Empty = single pod, file-backed state on the PVC below (unchanged behaviour).
+#
+# Setting it (e.g. redis://team-quiz-redis:6379) moves admin accounts and question
+# history into Redis. Worth doing even with ONE replica: it takes the admin
+# accounts off the pod's filesystem, so they survive the pod being rescheduled
+# somewhere the EBS volume cannot follow.
+#
+# The chart does not deploy Redis — point this at ElastiCache or an existing
+# in-cluster Redis. On first boot the app seeds Redis from an existing
+# admins.json, so no account has to be recreated by hand.
+redis:
+  url: ""
 
 persistence:
+  # Holds state.json and admins.json.
   enabled: true
-  storageClass: gp3          # EBS gp3 (requires the EBS CSI driver)
+  storageClass: gp3 # EBS gp3 (requires the EBS CSI driver)
   accessMode: ReadWriteOnce
   size: 1Gi
   mountPath: /data
 
 service:
   type: ClusterIP
-  port: 80                   # -> container 3000
+  port: 80 # -> container 3000
 
 ingress:
   enabled: true
@@ -48,13 +105,37 @@ ingress:
   host: quiz.massimodanieli.com
   # ACM certificate ARN for the host above, in the ALB's region (e.g. eu-west-2)
   certificateArn: ""
-  scheme: internet-facing    # or internal
+  scheme: internet-facing # or internal
   targetType: ip
   # WebSockets: raise the ALB idle timeout well above the default 60s
   idleTimeoutSeconds: 3600
   # Optional: share one ALB across ingresses
   groupName: ""
+  # When room affinity lands and you move to nginx-ingress, this is where it goes:
+  #   nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_room"
+  # It does nothing useful today (see the replicaCount note above). An ALB cannot
+  # do it at all: ALB stickiness is cookie-based, i.e. per client — the wrong tool.
   extraAnnotations: {}
+
+# --- PodDisruptionBudget ------------------------------------------------------
+# Disabled ON PURPOSE. With replicaCount=1, any PDB requiring the pod to stay up
+# makes its eviction impossible to satisfy: node drains hang forever and you get
+# PodEvictionFailure on every AMI upgrade. The chart refuses to render a PDB
+# alongside a single replica unless you explicitly opt in.
+#
+# A PDB becomes genuinely useful once replicaCount > 1 (i.e. after room affinity):
+# set enabled=true with maxUnavailable=1.
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+  minAvailable: ""
+  # Escape hatch for the single-replica guard. Only set this if you have decided,
+  # deliberately, that blocking node drains is what you want.
+  allowSingleReplica: false
+
+# The app force-exits 5s after SIGTERM, so raising this does NOT protect a game
+# that is mid-question. Protect games by not deploying during a session.
+terminationGracePeriodSeconds: 30
 
 resources:
   requests:
